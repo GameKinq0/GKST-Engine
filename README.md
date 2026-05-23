@@ -13,7 +13,7 @@
 ## 🇬🇧 ENGLISH
 
 **The ultimate 3D asset pipeline for Roblox Studio, Unreal Engine, and Unity.**  
-Developed by [GameKing Studio](https://github.com/GameKing-Studio).
+Developed by [Gameking Studio](https://discord.com/invite/tbDM8k7cnj).
 
 ### 🚀 What is GKST Asset Engine?
 Importing complex 3D models into game engines is a nightmare. Roblox has strict 10,000 triangle limits per MeshPart, Unreal Engine uses Z-Up coordinates and requires specific `UCX_` collision names, and Unity expects Y-Up. 
