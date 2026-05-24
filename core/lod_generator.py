@@ -57,8 +57,11 @@ class GKSTLODGenerator:
                     decimate_mod.ratio = safe_ratio
                     decimate_mod.use_collapse_triangulate = False
                     
-                    # 4. CRITICAL FIX: Bake with Independent Depsgraph
+                    # 4. CRITICAL FIX: Zorunlu Depsgraph Güncellemesi
+                    # Bu satır olmadan Blender modifiyeri hesaba katmıyor ve sadece kopyalıyor!
                     dg = bpy.context.evaluated_depsgraph_get()
+                    dg.update() 
+                    
                     eval_obj = new_obj.evaluated_get(dg)
                     baked_mesh = bpy.data.meshes.new_from_object(eval_obj)
                     

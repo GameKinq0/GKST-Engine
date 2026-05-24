@@ -26,14 +26,20 @@ class GKSTSmartExporter:
     def _ensure_export_directory(self) -> bool:
         """Creates export directory if it doesn't exist and verifies write access."""
         try:
-            if not self.export_path:
-                print("[GKST EXPORT ERROR] Export path is empty")
-                return False
+            # CRITICAL FIX: Handle unsaved .blend files and empty paths safely.
+            if not self.export_path or self.export_path == "//":
+                if not bpy.data.filepath:
+                    print("[GKST EXPORT WARNING] Blend file unsaved. Defaulting to Temp Directory.")
+                    import tempfile
+                    self.export_path = os.path.join(tempfile.gettempdir(), "GKST_Export")
+                else:
+                    self.export_path = bpy.path.abspath("//")
+            else:
+                self.export_path = bpy.path.abspath(self.export_path)
             
             if not os.path.exists(self.export_path):
                 os.makedirs(self.export_path, exist_ok=True)
             
-            # FIX: Verify directory is writable
             if not os.access(self.export_path, os.W_OK):
                 print(f"[GKST EXPORT ERROR] Export directory is not writable: {self.export_path}")
                 return False
@@ -66,16 +72,17 @@ class GKSTSmartExporter:
             
             print(f"[GKST EXPORT] Exporting FBX: {filepath}")
             
-            # Store original selection state
             original_selected = [o for o in bpy.context.selected_objects]
             original_active = bpy.context.view_layer.objects.active
             
-            # Select and set active
+            # CRITICAL FIX: Ensure object mode before export to prevent context crashes.
+            if bpy.context.object and bpy.context.object.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+            
             bpy.ops.object.select_all(action='DESELECT')
             self.obj.select_set(True)
             bpy.context.view_layer.objects.active = self.obj
             
-            # FBX export settings
             try:
                 bpy.ops.export_scene.fbx(
                     filepath=filepath,
@@ -99,7 +106,6 @@ class GKSTSmartExporter:
             print(f"[GKST EXPORT ERROR] FBX export failed: {e}")
             return False
         finally:
-            # Restore original selection state
             try:
                 bpy.ops.object.select_all(action='DESELECT')
                 for obj in original_selected:
@@ -127,7 +133,6 @@ class GKSTSmartExporter:
                 if material is None:
                     continue
                 
-                # Check for use_nodes and node_tree
                 if not material.use_nodes or not material.node_tree:
                     continue
                 
@@ -136,17 +141,14 @@ class GKSTSmartExporter:
                         if node.type == 'TEX_IMAGE' and hasattr(node, 'image') and node.image:
                             image = node.image
                             
-                            # Skip packed images
                             if image.packed_file:
                                 print(f"[GKST EXPORT INFO] Skipping packed image: {image.name}")
                                 continue
                             
-                            # Get image filepath
                             if image.filepath:
                                 src_path = bpy.path.abspath(image.filepath)
                                 
                                 if os.path.exists(src_path):
-                                    # Copy texture to export directory
                                     dst_name = os.path.basename(src_path)
                                     dst_path = os.path.join(textures_dir, dst_name)
                                     
