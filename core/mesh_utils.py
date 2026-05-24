@@ -11,38 +11,64 @@ class GKSTMeshSplitter:
 
     @staticmethod
     def _calculate_optimal_cut_plane(obj: bpy.types.Object):
-        local_coords = [mathutils.Vector(corner) for corner in obj.bound_box]
-        
-        max_coord = mathutils.Vector((
-            max(c[0] for c in local_coords), max(c[1] for c in local_coords), max(c[2] for c in local_coords)
-        ))
-        min_coord = mathutils.Vector((
-            min(c[0] for c in local_coords), min(c[1] for c in local_coords), min(c[2] for c in local_coords)
-        ))
+        """BUG FIX: Add bounds checking for empty bound_box"""
+        try:
+            local_coords = [mathutils.Vector(corner) for corner in obj.bound_box]
+            
+            if not local_coords:
+                print(f"[GKST MESH WARNING] Empty bound box for {obj.name}")
+                return obj.location, mathutils.Vector((0, 0, 1))
+            
+            max_coord = mathutils.Vector((
+                max(c[0] for c in local_coords), max(c[1] for c in local_coords), max(c[2] for c in local_coords)
+            ))
+            min_coord = mathutils.Vector((
+                min(c[0] for c in local_coords), min(c[1] for c in local_coords), min(c[2] for c in local_coords)
+            ))
 
-        dimensions = max_coord - min_coord
-        local_center = (max_coord + min_coord) / 2.0
-        world_center = obj.matrix_world @ local_center
-        world_rotation = obj.matrix_world.to_3x3()
-        
-        if dimensions.x >= dimensions.y and dimensions.x >= dimensions.z:
-            plane_normal = world_rotation @ mathutils.Vector((1, 0, 0))
-        elif dimensions.y >= dimensions.x and dimensions.y >= dimensions.z:
-            plane_normal = world_rotation @ mathutils.Vector((0, 1, 0))
-        else:
-            plane_normal = world_rotation @ mathutils.Vector((0, 0, 1))
+            dimensions = max_coord - min_coord
+            local_center = (max_coord + min_coord) / 2.0
+            world_center = obj.matrix_world @ local_center
+            world_rotation = obj.matrix_world.to_3x3()
+            
+            if dimensions.x >= dimensions.y and dimensions.x >= dimensions.z:
+                plane_normal = world_rotation @ mathutils.Vector((1, 0, 0))
+            elif dimensions.y >= dimensions.x and dimensions.y >= dimensions.z:
+                plane_normal = world_rotation @ mathutils.Vector((0, 1, 0))
+            else:
+                plane_normal = world_rotation @ mathutils.Vector((0, 0, 1))
 
-        return world_center, plane_normal.normalized()
+            return world_center, plane_normal.normalized()
+        except Exception as e:
+            print(f"[GKST MESH ERROR] Failed to calculate cut plane: {e}")
+            return obj.location, mathutils.Vector((0, 0, 1))
 
     @staticmethod
     def split_object(obj: bpy.types.Object, limit: int = 9500) -> bool:
         if not obj or obj.type != 'MESH':
+            print(f"[GKST MESH ERROR] Invalid object type: {obj.type if obj else 'None'}")
             return False
 
+        # BUG FIX: Check for valid 3D view context
         window = bpy.context.window
+        if not window:
+            print("[GKST MESH ERROR] No active window context found")
+            return False
+        
         screen = window.screen
+        if not screen:
+            print("[GKST MESH ERROR] No screen found in window")
+            return False
+        
         area = next((a for a in screen.areas if a.type == 'VIEW_3D'), None)
-        region = next((r for r in area.regions if r.type == 'WINDOW'), None) if area else None
+        if not area:
+            print("[GKST MESH ERROR] No 3D View area found")
+            return False
+        
+        region = next((r for r in area.regions if r.type == 'WINDOW'), None)
+        if not region:
+            print("[GKST MESH ERROR] No window region found in 3D View")
+            return False
 
         override: Dict[str, Any] = {
             'window': window, 'screen': screen, 'area': area, 'region': region,
@@ -88,6 +114,8 @@ class GKSTMeshSplitter:
                     part.name = f"{original_active_name}_Part_{index}"
                     if parent_collection not in list(part.users_collection):
                         parent_collection.objects.link(part)
+            
+            print(f"[GKST MESH SUCCESS] {obj.name} split into {len(resulting_parts)} parts")
             return True
 
         except Exception as e:
@@ -106,5 +134,5 @@ class GKSTMeshSplitter:
                         bpy.context.view_layer.objects.active = active_obj
                         if active_obj.mode != original_mode:
                             bpy.ops.object.mode_set(mode=original_mode)
-            except:
-                pass
+            except Exception as cleanup_error:
+                print(f"[GKST MESH WARNING] Cleanup failed: {cleanup_error}")

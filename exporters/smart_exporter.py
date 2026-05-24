@@ -25,8 +25,18 @@ class GKSTSmartExporter:
     def _ensure_export_directory(self) -> bool:
         """Creates export directory if it doesn't exist."""
         try:
+            if not self.export_path:
+                print("[GKST EXPORT ERROR] Export path is empty")
+                return False
+            
             if not os.path.exists(self.export_path):
                 os.makedirs(self.export_path, exist_ok=True)
+            
+            # BUG FIX: Verify directory is writable
+            if not os.access(self.export_path, os.W_OK):
+                print(f"[GKST EXPORT ERROR] Export directory is not writable: {self.export_path}")
+                return False
+            
             return True
         except Exception as e:
             print(f"[GKST EXPORT ERROR] Failed to create export directory: {e}")
@@ -49,23 +59,36 @@ class GKSTSmartExporter:
     def export_fbx(self, filepath: str) -> bool:
         """Exports mesh as FBX file."""
         try:
+            if not filepath:
+                print("[GKST EXPORT ERROR] Invalid filepath")
+                return False
+            
             print(f"[GKST EXPORT] Exporting FBX: {filepath}")
             
+            # BUG FIX: Store original selection state
+            original_selected = [o for o in bpy.context.selected_objects]
+            original_active = bpy.context.view_layer.objects.active
+            
             # Select and set active
-            bpy.context.view_layer.objects.active = self.obj
+            bpy.ops.object.select_all(action='DESELECT')
             self.obj.select_set(True)
+            bpy.context.view_layer.objects.active = self.obj
             
             # FBX export settings
-            bpy.ops.export_scene.fbx(
-                filepath=filepath,
-                use_selection=True,
-                use_mesh_modifiers=True,
-                use_animaion=False,
-                object_types={'MESH'},
-                bake_space_transform=True,
-                axis_forward='-Y',
-                axis_up='Z' if self.engine == "UNREAL" else 'Y'
-            )
+            try:
+                bpy.ops.export_scene.fbx(
+                    filepath=filepath,
+                    use_selection=True,
+                    use_mesh_modifiers=True,
+                    use_animaion=False,
+                    object_types={'MESH'},
+                    bake_space_transform=True,
+                    axis_forward='-Y',
+                    axis_up='Z' if self.engine == "UNREAL" else 'Y'
+                )
+            except RuntimeError as e:
+                print(f"[GKST EXPORT ERROR] FBX export operator failed: {e}")
+                return False
             
             print(f"[GKST EXPORT SUCCESS] FBX exported: {filepath}")
             return True
@@ -73,6 +96,17 @@ class GKSTSmartExporter:
         except Exception as e:
             print(f"[GKST EXPORT ERROR] FBX export failed: {e}")
             return False
+        finally:
+            # BUG FIX: Restore original selection state
+            try:
+                bpy.ops.object.select_all(action='DESELECT')
+                for obj in original_selected:
+                    if obj and obj.name in bpy.data.objects:
+                        obj.select_set(True)
+                if original_active and original_active.name in bpy.data.objects:
+                    bpy.context.view_layer.objects.active = original_active
+            except:
+                pass
 
     def export_textures(self) -> bool:
         """Exports textures used by the mesh."""
@@ -91,13 +125,27 @@ class GKSTSmartExporter:
                 if material is None:
                     continue
                 
-                for node in material.node_tree.nodes if hasattr(material, 'node_tree') else []:
-                    if node.type == 'TEX_IMAGE' and node.image:
-                        image = node.image
-                        texture_path = os.path.join(textures_dir, f"{image.name}.png")
-                        image.save_render(texture_path)
-                        exported_count += 1
-                        print(f"[GKST EXPORT] Saved texture: {image.name}")
+                # BUG FIX: Safely check for node_tree attribute
+                if not hasattr(material, 'node_tree') or not material.node_tree:
+                    continue
+                
+                try:
+                    for node in material.node_tree.nodes:
+                        if node.type == 'TEX_IMAGE' and hasattr(node, 'image') and node.image:
+                            image = node.image
+                            
+                            # BUG FIX: Sanitize filename
+                            safe_name = "".join(c for c in image.name if c.isalnum() or c in ('_', '-', '.'))
+                            texture_path = os.path.join(textures_dir, f"{safe_name}.png")
+                            
+                            try:
+                                image.save_render(texture_path)
+                                exported_count += 1
+                                print(f"[GKST EXPORT] Saved texture: {image.name}")
+                            except Exception as img_error:
+                                print(f"[GKST EXPORT WARNING] Failed to save texture {image.name}: {img_error}")
+                except Exception as node_error:
+                    print(f"[GKST EXPORT WARNING] Error processing material nodes: {node_error}")
             
             print(f"[GKST EXPORT SUCCESS] Exported {exported_count} textures.")
             return True
