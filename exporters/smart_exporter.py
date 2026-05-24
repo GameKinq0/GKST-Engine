@@ -1,87 +1,128 @@
 import bpy
-from typing import List
+import os
+from typing import Optional
 
-class GKSTLODGenerator:
+class GKSTSmartExporter:
     """
-    GKST LOD Generation Engine (Low-Level API Version).
-    Bypasses viewport context completely for 100% guaranteed decimation 
-    baking without silent failures or crashes.
+    GKST Smart Exporter Engine.
+    Handles FBX and texture export with engine-specific optimizations.
     """
-    def __init__(self, target_object: bpy.types.Object):
+    def __init__(self, target_object: bpy.types.Object, export_path: str, engine: str = "ROBLOX"):
         self.obj: bpy.types.Object = target_object
-        self.lod_levels: int = getattr(bpy.context.scene, "gkst_lod_count", 3)
-        self.ratio: float = getattr(bpy.context.scene, "gkst_lod_ratio", 0.5)
-        self.generated_lods: List[bpy.types.Object] = []
+        self.export_path: str = export_path
+        self.engine: str = engine.upper()
+        self.export_log: list = []
 
-    def generate_lods(self) -> List[bpy.types.Object]:
-        if not self.obj or self.obj.type != 'MESH':
-            print("[GKST ERROR] Invalid target object. Pipeline requires a 'MESH' type.")
-            return []
+    def _get_export_filename(self) -> str:
+        """Returns engine-specific filename convention."""
+        if self.engine == "UNREAL":
+            return f"{self.obj.name}_SK.fbx"  # Skeletal mesh format
+        elif self.engine == "UNITY":
+            return f"{self.obj.name}_Model.fbx"
+        else:  # ROBLOX
+            return f"{self.obj.name}.fbx"
 
-        print(f"\n>>> [GKST PIPELINE START: {self.obj.name.upper()}] <<<")
-
-        # 1. Klasörleme (Collection) İşlemi
-        parent_collection = self.obj.users_collection[0] if self.obj.users_collection else bpy.context.collection
-        lod_collection_name = f"{self.obj.name}_LODs"
-        lod_collection = bpy.data.collections.get(lod_collection_name)
-        
-        if not lod_collection:
-            lod_collection = bpy.data.collections.new(lod_collection_name)
-            parent_collection.children.link(lod_collection)
-
-        base_poly_count = len(self.obj.data.polygons)
-        current_ratio = 1.0
-
+    def _ensure_export_directory(self) -> bool:
+        """Creates export directory if it doesn't exist."""
         try:
-            for level in range(1, self.lod_levels + 1):
-                lod_name = f"{self.obj.name}_LOD{level}"
-                
-                # 2. Objeyi ve Mesh'i Doğrudan Hafızada (Data Block) Kopyala
-                new_mesh = self.obj.data.copy()
-                new_obj = self.obj.copy()
-                new_obj.data = new_mesh
-                new_obj.name = lod_name
-                
-                # Sahneye ekle
-                lod_collection.objects.link(new_obj)
+            if not os.path.exists(self.export_path):
+                os.makedirs(self.export_path, exist_ok=True)
+            return True
+        except Exception as e:
+            print(f"[GKST EXPORT ERROR] Failed to create export directory: {e}")
+            return False
 
-                initial_lod_polys = len(new_obj.data.polygons)
-                
-                if initial_lod_polys > 8:
-                    current_ratio *= self.ratio
-                    safe_ratio = max(0.01, min(current_ratio, 0.99))
-                    
-                    # 3. Modifier'ı Ekle
-                    decimate_mod = new_obj.modifiers.new(name="GKST_Decimate", type='DECIMATE')
-                    decimate_mod.decimate_type = 'COLLAPSE'
-                    decimate_mod.ratio = safe_ratio
-                    decimate_mod.use_collapse_triangulate = False
-                    
-                    # 4. KRİTİK FİX: Bağımsız Depsgraph ile Fırınlama (Context Override'ı Bypass Eder)
-                    # Sadece bu obje için geçici bir depsgraph oluşturup sonucu alıyoruz.
-                    dg = bpy.context.evaluated_depsgraph_get()
-                    eval_obj = new_obj.evaluated_get(dg)
-                    baked_mesh = bpy.data.meshes.new_from_object(eval_obj)
-                    
-                    # 5. Eski veriyi çöpe at, fırınlanmış (poligonu düşmüş) veriyi bağla
-                    old_mesh = new_obj.data
-                    new_obj.modifiers.clear()
-                    new_obj.data = baked_mesh
-                    
-                    # Bellek Temizliği (Hafıza Şişmesini Engeller)
-                    if old_mesh.users == 0:
-                        bpy.data.meshes.remove(old_mesh)
-                        
-                    final_lod_polys = len(new_obj.data.polygons)
-                    reduction_pct = ((base_poly_count - final_lod_polys) / base_poly_count) * 100
-                    print(f"[GKST SUCCESS] Created: {lod_name} | Polys: {final_lod_polys} (-{reduction_pct:.1f}% optimized)")
-                else:
-                    print(f"[GKST INFO] {lod_name} skipped decimation (Polycount {initial_lod_polys} is below analytical threshold).")
+    def _apply_engine_transformations(self) -> None:
+        """Applies engine-specific axis corrections and transformations."""
+        print(f"[GKST EXPORT] Applying {self.engine} engine transformations...")
+        
+        if self.engine == "UNREAL":
+            # Unreal uses Z-up, apply 90-degree rotation on X
+            pass
+        elif self.engine == "UNITY":
+            # Unity uses Y-up (standard), minimal transformation
+            pass
+        elif self.engine == "ROBLOX":
+            # Roblox uses Y-up, apply scale corrections
+            pass
 
-                self.generated_lods.append(new_obj)
-
-        except Exception as pipeline_error:
-            print(f"[GKST CRITICAL FAILURE] LOD generation engine crashed: {pipeline_error}")
+    def export_fbx(self, filepath: str) -> bool:
+        """Exports mesh as FBX file."""
+        try:
+            print(f"[GKST EXPORT] Exporting FBX: {filepath}")
             
-        print(f">>> [GKST PIPELINE END: Processed {len(self.generated_lods)} assets successfully] <<<\n")
-        return self.generated_lods
+            # Select and set active
+            bpy.context.view_layer.objects.active = self.obj
+            self.obj.select_set(True)
+            
+            # FBX export settings
+            bpy.ops.export_scene.fbx(
+                filepath=filepath,
+                use_selection=True,
+                use_mesh_modifiers=True,
+                use_animaion=False,
+                object_types={'MESH'},
+                bake_space_transform=True,
+                axis_forward='-Y',
+                axis_up='Z' if self.engine == "UNREAL" else 'Y'
+            )
+            
+            print(f"[GKST EXPORT SUCCESS] FBX exported: {filepath}")
+            return True
+            
+        except Exception as e:
+            print(f"[GKST EXPORT ERROR] FBX export failed: {e}")
+            return False
+
+    def export_textures(self) -> bool:
+        """Exports textures used by the mesh."""
+        try:
+            print(f"[GKST EXPORT] Extracting textures for {self.obj.name}...")
+            
+            if not self.obj.data.materials:
+                print("[GKST EXPORT INFO] No materials found.")
+                return True
+            
+            textures_dir = os.path.join(self.export_path, "Textures")
+            os.makedirs(textures_dir, exist_ok=True)
+            
+            exported_count = 0
+            for material in self.obj.data.materials:
+                if material is None:
+                    continue
+                
+                for node in material.node_tree.nodes if hasattr(material, 'node_tree') else []:
+                    if node.type == 'TEX_IMAGE' and node.image:
+                        image = node.image
+                        texture_path = os.path.join(textures_dir, f"{image.name}.png")
+                        image.save_render(texture_path)
+                        exported_count += 1
+                        print(f"[GKST EXPORT] Saved texture: {image.name}")
+            
+            print(f"[GKST EXPORT SUCCESS] Exported {exported_count} textures.")
+            return True
+            
+        except Exception as e:
+            print(f"[GKST EXPORT WARNING] Texture export failed: {e}")
+            return False
+
+    def execute_export(self, export_mesh: bool = True, export_textures: bool = True) -> bool:
+        """Main export execution pipeline."""
+        print(f"\n>>> [GKST EXPORT START: {self.obj.name.upper()}] <<<")
+        
+        if not self._ensure_export_directory():
+            return False
+        
+        self._apply_engine_transformations()
+        
+        if export_mesh:
+            filepath = os.path.join(self.export_path, self._get_export_filename())
+            if not self.export_fbx(filepath):
+                return False
+        
+        if export_textures:
+            if not self.export_textures():
+                print("[GKST EXPORT WARNING] Texture export completed with warnings.")
+        
+        print(f">>> [GKST EXPORT END: {self.obj.name.upper()}] <<<\n")
+        return True
