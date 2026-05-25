@@ -1,13 +1,12 @@
 import bpy
+import mathutils
+import os
 from ..core.retopology_optimizer import GKSTRetopologyOptimizer
 from ..core.lod_generator import GKSTLODGenerator
 from ..core.collision_builder import GKSTCollisionBuilder
 from ..exporters.smart_exporter import GKSTSmartExporter
 
-# Önceki import ve properties...
-import mathutils
-import os
-
+# --- KULLANICI AYARLARI ---
 def init_properties():
     bpy.types.Scene.gkst_target_engine = bpy.props.EnumProperty(
         name="Hedef Motor",
@@ -21,11 +20,6 @@ def init_properties():
     bpy.types.Scene.gkst_export_path = bpy.props.StringProperty(
         name="Çıktı Klasörü", default="//", subtype='DIR_PATH'
     )
-    bpy.types.Scene.gkst_lod_count = bpy.props.IntProperty(name="LOD Seviyesi", default=3, min=1, max=6)
-    bpy.types.Scene.gkst_lod_ratio = bpy.props.FloatProperty(name="Azaltma Oranı", default=0.5, min=0.1, max=0.9)
-    bpy.types.Scene.gkst_export_textures = bpy.props.BoolProperty(name="Dokuları (Texture) Çıkar", default=True)
-    
-    # NEW: Retopology target poly count
     bpy.types.Scene.gkst_target_poly_count = bpy.props.IntProperty(
         name="Hedef Polygon Sayısı", 
         default=5000, 
@@ -33,14 +27,18 @@ def init_properties():
         max=100000,
         description="Retopology sonrası hedef üçgen sayısı"
     )
+    bpy.types.Scene.gkst_lod_count = bpy.props.IntProperty(name="LOD Seviyesi", default=3, min=1, max=6)
+    bpy.types.Scene.gkst_lod_ratio = bpy.props.FloatProperty(name="Azaltma Oranı", default=0.5, min=0.1, max=0.9)
+    bpy.types.Scene.gkst_export_textures = bpy.props.BoolProperty(name="Dokuları (Texture) Çıkar", default=True)
 
 def clear_properties():
-    props = ["gkst_target_engine", "gkst_export_path", "gkst_lod_count", "gkst_lod_ratio", "gkst_export_textures", "gkst_target_poly_count"]
+    props = ["gkst_target_engine", "gkst_export_path", "gkst_target_poly_count", "gkst_lod_count", "gkst_lod_ratio", "gkst_export_textures"]
     for p in props:
         if hasattr(bpy.types.Scene, p): delattr(bpy.types.Scene, p)
 
+# --- PANEL ÇİZİMİ ---
 class GKST_PT_MainPanel(bpy.types.Panel):
-    bl_label = "GameKing Engine v2.5"
+    bl_label = "GameKing Engine v3.0"
     bl_idname = "GKST_PT_main_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -51,7 +49,7 @@ class GKST_PT_MainPanel(bpy.types.Panel):
         scene = context.scene
         obj = context.active_object
 
-        # İstatistikler
+        # İstatistikler (Box Layout)
         box = layout.box()
         box.label(text="Sahne İstatistikleri", icon='OUTLINER_OB_MESH')
         if obj and obj.type == 'MESH':
@@ -69,10 +67,8 @@ class GKST_PT_MainPanel(bpy.types.Panel):
         col.label(text="1. Motor ve Çıktı:", icon='PREFERENCES')
         col.prop(scene, "gkst_target_engine")
         col.prop(scene, "gkst_export_path")
+        col.prop(scene, "gkst_target_poly_count", text="Hedef Polygon")
         col.prop(scene, "gkst_export_textures", icon='MATERIAL')
-        
-        # NEW: Retopology target
-        col.prop(scene, "gkst_target_poly_count")
 
         layout.separator()
 
@@ -82,7 +78,6 @@ class GKST_PT_MainPanel(bpy.types.Panel):
         row.operator("gkst.origin_to_bottom", text="Pivot'u Zemine Al", icon='TRIA_DOWN')
         row.operator("gkst.purge_data", text="Temizle & UV Aç", icon='UV')
         
-        # NEW: Retopology button
         row2 = layout.row(align=True)
         row2.operator("gkst.retopology", text="Otomatik Retopology", icon='MOD_REMESH')
         row2.operator("gkst.extract_textures", text="Sadece Doku Al", icon='FILE_IMAGE')
@@ -97,12 +92,14 @@ class GKST_PT_MainPanel(bpy.types.Panel):
 
         layout.separator()
 
-        # MASTER PIPELINE
+        # MASTER PIPELINE BUTONU
         box_master = layout.box()
         box_master.scale_y = 1.5
         box_master.operator("gkst.master_execute", text="1-CLICK MASTER PIPELINE", icon='PLAY')
 
-# NEW: Retopology Operator
+# --- OPERATÖRLER ---
+
+# Otomatik Retopology
 class GKST_OT_Retopology(bpy.types.Operator):
     bl_idname = "gkst.retopology"
     bl_label = "Otomatik Retopology"
@@ -127,6 +124,7 @@ class GKST_OT_Retopology(bpy.types.Operator):
         
         return {'FINISHED'}
 
+# Sadece Doku Çıkarma
 class GKST_OT_ExtractTextures(bpy.types.Operator):
     bl_idname = "gkst.extract_textures"
     bl_label = "Sadece Texture Çıkar"
@@ -141,13 +139,14 @@ class GKST_OT_ExtractTextures(bpy.types.Operator):
                 if exporter.execute_export(export_mesh=False, export_textures=True):
                     success_count += 1
         
-        self.report({'INFO'}, f"GKST: {success_count} objenin texture'ları çıkarıldı.")
+        self.report({'INFO'}, f"GKST: {success_count} objenin texture'ları başarıyla çıkarıldı.")
         return {'FINISHED'}
 
+# 1-Click Master Execute (Tüm Pipeline)
 class GKST_OT_MasterExecute(bpy.types.Operator):
     bl_idname = "gkst.master_execute"
     bl_label = "Master Pipeline Başlat"
-    bl_description = "Retopology -> LOD -> Collision -> Export"
+    bl_description = "Retopology -> LOD -> Collision -> Texture Çıkarma -> FBX Export"
     
     def execute(self, context):
         scene = context.scene
@@ -170,12 +169,12 @@ class GKST_OT_MasterExecute(bpy.types.Operator):
             
             bpy.context.view_layer.objects.active = obj
             
-            # 1. Retopology (new!)
+            # 1. Retopology (NEW!)
             print(f"[GKST PIPELINE] Retopology yapılıyor: {obj.name}")
             optimizer = GKSTRetopologyOptimizer(obj, scene.gkst_target_poly_count)
             optimizer.optimize()
             
-            # 2. LOD Generation
+            # 2. LOD Üretimi
             print(f"[GKST PIPELINE] LOD üretiliyor: {obj.name}")
             GKSTLODGenerator(obj).generate_lods()
             
@@ -183,8 +182,8 @@ class GKST_OT_MasterExecute(bpy.types.Operator):
             print(f"[GKST PIPELINE] Collision oluşturuluyor: {obj.name}")
             GKSTCollisionBuilder(obj, scene.gkst_target_engine).build_convex_hull()
             
-            # 4. Export
-            print(f"[GKST PIPELINE] Export yapılıyor: {obj.name}")
+            # 4. FBX ve Texture Export
+            print(f"[GKST PIPELINE] Export başlatılıyor: {obj.name}")
             exporter = GKSTSmartExporter(obj, path, scene.gkst_target_engine)
             exporter.execute_export(export_mesh=True, export_textures=scene.gkst_export_textures)
             
@@ -194,6 +193,7 @@ class GKST_OT_MasterExecute(bpy.types.Operator):
         self.report({'INFO'}, f"GKST MASTER PIPELINE TAMAMLANDI! Klasör: {path}")
         return {'FINISHED'}
 
+# Origin To Bottom
 class GKST_OT_OriginToBottom(bpy.types.Operator):
     bl_idname = "gkst.origin_to_bottom"
     bl_label = "Pivot'u Zemine Al"
@@ -209,6 +209,7 @@ class GKST_OT_OriginToBottom(bpy.types.Operator):
                 bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
         return {'FINISHED'}
 
+# Purge Data
 class GKST_OT_PurgeData(bpy.types.Operator):
     bl_idname = "gkst.purge_data"
     bl_label = "Temizle/UV"
@@ -226,6 +227,7 @@ class GKST_OT_PurgeData(bpy.types.Operator):
         bpy.ops.outliner.orphans_purge(do_local_ids=True, do_recursive=True)
         return {'FINISHED'}
 
+# Generate LOD
 class GKST_OT_GenerateLOD(bpy.types.Operator):
     bl_idname = "gkst.generate_lod"
     bl_label = "LOD Üret"
@@ -235,6 +237,7 @@ class GKST_OT_GenerateLOD(bpy.types.Operator):
             GKSTLODGenerator(obj).generate_lods()
         return {'FINISHED'}
 
+# Build Collision
 class GKST_OT_BuildCollision(bpy.types.Operator):
     bl_idname = "gkst.build_collision"
     bl_label = "Collision Ekle"
@@ -244,7 +247,7 @@ class GKST_OT_BuildCollision(bpy.types.Operator):
             GKSTCollisionBuilder(obj, context.scene.gkst_target_engine).build_convex_hull()
         return {'FINISHED'}
 
-# REGISTRATION
+# --- REGISTRATION ---
 classes = (
     GKST_PT_MainPanel, 
     GKST_OT_OriginToBottom, 
@@ -252,7 +255,7 @@ classes = (
     GKST_OT_GenerateLOD, 
     GKST_OT_BuildCollision, 
     GKST_OT_ExtractTextures,
-    GKST_OT_Retopology,  # NEW
+    GKST_OT_Retopology,
     GKST_OT_MasterExecute
 )
 
