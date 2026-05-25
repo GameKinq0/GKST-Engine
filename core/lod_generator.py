@@ -6,6 +6,7 @@ class GKSTLODGenerator:
     GKST LOD Generation Engine (Low-Level API Version).
     Bypasses viewport context completely for 100% guaranteed decimation 
     baking without silent failures or crashes.
+    FIXED: Prevents nested spawning - places LODs side by side with offset.
     """
     def __init__(self, target_object: bpy.types.Object):
         self.obj: bpy.types.Object = target_object
@@ -31,16 +32,25 @@ class GKSTLODGenerator:
 
         base_poly_count = len(self.obj.data.polygons)
         current_ratio = 1.0
+        
+        # Get original object bounds for offset calculation
+        import mathutils
+        bbox = [mathutils.Vector(corner) for corner in self.obj.bound_box]
+        bbox_size_x = max([v.x for v in bbox]) - min([v.x for v in bbox])
 
         try:
             for level in range(1, self.lod_levels + 1):
                 lod_name = f"{self.obj.name}_LOD{level}"
                 
-                # 2. Copy Object and Mesh Data
+                # 2. Copy Object and Mesh Data (always from original, not from previous LOD)
                 new_mesh = self.obj.data.copy()
                 new_obj = self.obj.copy()
                 new_obj.data = new_mesh
                 new_obj.name = lod_name
+                
+                # FIX: Place LOD objects side by side with X offset to prevent nested spawning
+                offset_distance = bbox_size_x * 1.2 * level
+                new_obj.location.x += offset_distance
                 
                 # Add to collection
                 lod_collection.objects.link(new_obj)
@@ -57,8 +67,8 @@ class GKSTLODGenerator:
                     decimate_mod.ratio = safe_ratio
                     decimate_mod.use_collapse_triangulate = False
                     
-                    # 4. CRITICAL FIX: Zorunlu Depsgraph Güncellemesi
-                    # Bu satır olmadan Blender modifiyeri hesaba katmıyor ve sadece kopyalıyor!
+                    # 4. CRITICAL FIX: Depsgraph update required
+                    # Without this line, Blender doesn't account for the modifier!
                     dg = bpy.context.evaluated_depsgraph_get()
                     dg.update() 
                     
@@ -76,7 +86,7 @@ class GKSTLODGenerator:
                         
                     final_lod_polys = len(new_obj.data.polygons)
                     reduction_pct = ((base_poly_count - final_lod_polys) / base_poly_count) * 100
-                    print(f"[GKST LOD SUCCESS] Created: {lod_name} | Polys: {final_lod_polys} (-{reduction_pct:.1f}% optimized)")
+                    print(f"[GKST LOD SUCCESS] Created: {lod_name} | Polys: {final_lod_polys} (-{reduction_pct:.1f}% optimized) | Offset: +{offset_distance:.2f}m")
                 else:
                     print(f"[GKST LOD INFO] {lod_name} skipped decimation (Polycount {initial_lod_polys} is below analytical threshold).")
 
@@ -84,6 +94,8 @@ class GKSTLODGenerator:
 
         except Exception as pipeline_error:
             print(f"[GKST LOD CRITICAL FAILURE] LOD generation engine crashed: {pipeline_error}")
+            import traceback
+            traceback.print_exc()
             
         print(f">>> [GKST LOD PIPELINE END: Processed {len(self.generated_lods)} assets successfully] <<<\n")
         return self.generated_lods
