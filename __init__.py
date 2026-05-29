@@ -1,7 +1,7 @@
 bl_info = {
     "name": "GameKing Asset Engine (GKST)",
     "author": "GameKinq0 (GameKing Studio)",
-    "version": (2, 5, 0),
+    "version": (3, 1, 0),
     "blender": (3, 6, 0),
     "category": "3D View",
 }

@@ -38,7 +38,7 @@ def clear_properties():
 
 # --- PANEL ÇİZİMİ ---
 class GKST_PT_MainPanel(bpy.types.Panel):
-    bl_label = "GameKing Engine v3.0"
+    bl_label = "GameKing Engine v3.1"
     bl_idname = "GKST_PT_main_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
